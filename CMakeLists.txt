@@ -67,18 +67,18 @@ find_package(Eigen3 3.3.0 NO_MODULE REQUIRED)
 set_package_properties(Eigen3 PROPERTIES TYPE REQUIRED PURPOSE "C++ vector data structures")
 message(STATUS "Found Eigen3: ${Eigen3_DIR}")
 
-find_package(ViennaCL REQUIRED)
-set_package_properties(ViennaCL PROPERTIES TYPE REQUIRED PURPOSE "GPU stuff")
-message(STATUS "Found ViennaCL: ${VIENNACL_INCLUDE_DIRS}")
+find_package(AMGCL REQUIRED)
+set_package_properties(AMGCL PROPERTIES TYPE REQUIRED PURPOSE "GPU stuff")
+message(STATUS "Found AMGCL: ${AMGCL_INTERFACE_INCLUDE_DIRECTORIES}")
 
-################################################################################
-####### KERNEL, TESTS, APPLICATIONS
-################################################################################
+
+
+
+add_subdirectory(src)
 
 if(ENABLE_TESTING)
 	add_subdirectory(tests)
 endif()
-
 
 
 
