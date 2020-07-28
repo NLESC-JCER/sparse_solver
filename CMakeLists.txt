@@ -63,6 +63,9 @@ if(ENABLE_COVERAGE_BUILD)
 endif()
 
 
+find_package(OpenMP 4.5 REQUIRED)
+set_package_properties(OpenMP PROPERTIES TYPE RECOMMENDED PURPOSE "Used for thread parallelization in xtp")
+
 find_package(Eigen3 3.3.0 NO_MODULE REQUIRED)
 set_package_properties(Eigen3 PROPERTIES TYPE REQUIRED PURPOSE "C++ vector data structures")
 message(STATUS "Found Eigen3: ${Eigen3_DIR}")
