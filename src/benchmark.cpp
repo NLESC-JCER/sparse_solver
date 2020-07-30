@@ -212,7 +212,7 @@ std::string intial_guess_filename="";
     Eigen::VectorXd result_eigen3 = solver_eigen3.solveWithGuess(f, x0);
     prof.toc("solve_eigen_bicgstabl");
 
-    prof.tic("setup_eigen_IDRSTAB");
+    prof.tic("setup_eigen_idrstab");
     Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen4;
     solver_eigen4.setTolerance(tolerance);
     solver_eigen4.setMaxIterations(iterations);
