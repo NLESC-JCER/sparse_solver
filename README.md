@@ -8,10 +8,12 @@ This version requires the linear solver MR from Eigen
 
 Download and then run
 
-`mkdir build`
-`cd build`
-`cmake -DCMAKE_PREFIX_PATH="PATH_TO_AMGCL;PATH_TO_EIGEN" ..`
-`make`
+```mkdir build
+cd build
+cmake -DCMAKE_PREFIX_PATH="PATH_TO_AMGCL;PATH_TO_EIGEN" ..
+make
+```
+
 
 In `build/src` you will find a `benchmark` executable with `-h` you get help options. 
 
