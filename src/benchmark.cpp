@@ -27,7 +27,14 @@ int main(int argc, char *argv[])
 
     cxxopts::Options options("SparseSolverBench", "Benchmarking various sparse linear solvers");
 
-    options.add_options()("t,threads", "How many threads to use", cxxopts::value<int>()->default_value("1"))("s,tolerance", "Tolerance to which solvers should converge", cxxopts::value<double>()->default_value("1e-12"))("A,SparseMatrix", "MM Format File for Sparse Matrix", cxxopts::value<std::string>())("b,Rightside", "MM Format File for Vector", cxxopts::value<std::string>())("h,help", "Print usage");
+    options.add_options()
+    ("t,threads", "How many threads to use", cxxopts::value<int>()->default_value("1"))
+    ("s,tolerance", "Tolerance to which solvers should converge", cxxopts::value<double>()->default_value("1e-12"))
+    ("i,iterations", "max number of iterations", cxxopts::value<int>()->default_value("1000"))
+    ("A,SparseMatrix", "MM Format File for Sparse Matrix", cxxopts::value<std::string>())
+    ("b,Rightside", "MM Format File for Vector", cxxopts::value<std::string>())
+    ("x,initialguess", "MM Format File for InitialGuess", cxxopts::value<std::string>())
+    ("h,help", "Print usage");
 
     auto result = options.parse(argc, argv);
 
@@ -37,14 +44,21 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
+std::string intial_guess_filename="";
+    if (result.count("initialguess")){
+      intial_guess_filename = result["initialguess"].as<std::string>();
+    }
     int threads = result["threads"].as<int>();
     double tolerance = result["tolerance"].as<double>();
+    int iterations=result["iterations"].as<int>();
     std::string A_filename = result["SparseMatrix"].as<std::string>();
     std::string b_filename = result["Rightside"].as<std::string>();
 
     std::cout << "Running profiler with " << threads << " threads\n"
-              << "Required tolerance " << tolerance << "\nA:" << A_filename << "\nb" << b_filename << std::endl;
-
+              << "Required tolerance " << tolerance << " num iterations "<<iterations<< "\nA:" << A_filename << "\nb" << b_filename << std::endl;
+    if(intial_guess_filename.size()){
+        std::cout<<"x0:"<<intial_guess_filename<<std::endl;
+    }
     omp_set_num_threads(threads);
 
     amgcl::profiler<> prof;
@@ -53,17 +67,19 @@ int main(int argc, char *argv[])
     // In general this should come pre-assembled.
     Eigen::SparseMatrix<double, Eigen::RowMajor> A;
 
-    prof.tic("read");
+    prof.tic("read_input");
     Eigen::loadMarket(A, A_filename);
 
     Eigen::VectorXd f;
     Eigen::loadMarketVector(f, b_filename);
-    prof.toc("read");
+    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(A.rows());
+    if(intial_guess_filename.size()){
+        Eigen::loadMarketVector(x0, intial_guess_filename);
+    }
+    prof.toc("read_input");
     std::vector<double> f2 = std::vector<double>(f.data(), f.data() + f.size());
-
-    // Zero initial approximation:
-    Eigen::VectorXd x = Eigen::VectorXd::Zero(A.rows());
-    Eigen::VectorXd x3 = x;
+    Eigen::VectorXd x = x0;
+    Eigen::VectorXd x3 = x0;
 
     std::vector<double> x2 = std::vector<double>(x.data(), x.data() + x.size());
     std::vector<double> x4 = x2;
@@ -89,18 +105,18 @@ int main(int argc, char *argv[])
 
     Solver::params prm;
     prm.solver.tol = tolerance;
-
-    prof.tic("setup_amgcl");
+    prm.solver.maxiter=iterations;
+    prof.tic("setup_amgcl_bicgstab");
     Solver solve(A_amgcl, prm);
-    prof.toc("setup_amgcl");
+    prof.toc("setup_amgcl_bicgstab");
     std::cout << solve << std::endl;
 
     // Solve the system for the given RHS:
     int iters;
     double error;
-    prof.tic("solve_amgcl");
+    prof.tic("solve_amgcl_bicgstab");
     std::tie(iters, error) = solve(A_amgcl, f2, x2);
-    prof.toc("solve_amgcl");
+    prof.toc("solve_amgcl_bicgstab");
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -113,7 +129,7 @@ int main(int argc, char *argv[])
 
     Solver_bicgstabl::params prm_bicgstabl;
     prm_bicgstabl.solver.tol = tolerance;
-
+    prm_bicgstabl.solver.maxiter=iterations;
     prof.tic("setup_amgcl_bicgstabl");
     Solver_bicgstabl solve_bicgstabl(A_amgcl, prm_bicgstabl);
     prof.toc("setup_amgcl_bicgstabl");
@@ -138,7 +154,7 @@ int main(int argc, char *argv[])
 
     Solver_idrs::params prm_idrs;
     prm_idrs.solver.tol = tolerance;
-
+    prm_idrs.solver.maxiter=iterations;
     prof.tic("setup_amgcl_idrs");
     Solver_idrs solve_idrs(A_amgcl, prm_idrs);
     prof.toc("setup_amgcl_idrs");
@@ -165,43 +181,46 @@ int main(int argc, char *argv[])
 
     Solver2::params prm2;
     prm2.solver.tol = tolerance;
-
-    prof.tic("setup_amgcl_eigen");
+    prm2.solver.maxiter=iterations;
+    prof.tic("setup_amgcl_bicgstab_eigen");
     Solver2 solve2(A, prm2);
-    prof.toc("setup_amgcl_eigen");
+    prof.toc("setup_amgcl_bicgstab_eigen");
     int iters2;
     double error2;
-    prof.tic("solve_amgcl_eigen");
+    prof.tic("solve_amgcl_bicgstab_eigen");
     std::tie(iters2, error2) = solve2(A, f, x);
-    prof.toc("solve_amgcl_eigen");
+    prof.toc("solve_amgcl_bicgstab_eigen");
     std::cout << solve2 << std::endl;
 
-    prof.tic("setup_eigen");
+    prof.tic("setup_eigen_bicgstab");
     Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen;
     solver_eigen.setTolerance(tolerance);
+    solver_eigen.setMaxIterations(iterations);
     solver_eigen.compute(A);
-    prof.toc("setup_eigen");
-    prof.tic("solve_eigen");
-    Eigen::VectorXd result_eigen = solver_eigen.solveWithGuess(f, x3);
-    prof.toc("solve_eigen");
+    prof.toc("setup_eigen_bicgstab");
+    prof.tic("solve_eigen_bicgstab");
+    Eigen::VectorXd result_eigen = solver_eigen.solveWithGuess(f, x0);
+    prof.toc("solve_eigen_bicgstab");
 
-    prof.tic("setup_eigen_BiCGSTABL");
+    prof.tic("setup_eigen_bicgstabl");
     Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen3;
     solver_eigen3.setTolerance(tolerance);
+    solver_eigen3.setMaxIterations(iterations);
     solver_eigen3.compute(A);
-    prof.toc("setup_eigen_BiCGSTABL");
-    prof.tic("solve_eigen_BiCGSTABL");
-    Eigen::VectorXd result_eigen3 = solver_eigen3.solveWithGuess(f, x3);
-    prof.toc("solve_eigen_BiCGSTABL");
+    prof.toc("setup_eigen_bicgstabl");
+    prof.tic("solve_eigen_bicgstabl");
+    Eigen::VectorXd result_eigen3 = solver_eigen3.solveWithGuess(f, x0);
+    prof.toc("solve_eigen_bicgstabl");
 
     prof.tic("setup_eigen_IDRSTAB");
     Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen4;
     solver_eigen4.setTolerance(tolerance);
+    solver_eigen4.setMaxIterations(iterations);
     solver_eigen4.compute(A);
-    prof.toc("setup_eigen_IDRSTAB");
-    prof.tic("solve_eigen_IDRSTAB");
-    Eigen::VectorXd result_eigen4 = solver_eigen4.solveWithGuess(f, x3);
-    prof.toc("solve_eigen_IDRSTAB");
+    prof.toc("setup_eigen_idrstab");
+    prof.tic("solve_eigen_idrstab");
+    Eigen::VectorXd result_eigen4 = solver_eigen4.solveWithGuess(f, x0);
+    prof.toc("solve_eigen_idrstab");
 
     // prof.tic("setup_eigen_LU");
     // Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>, Eigen::IncompleteLUT<double>> solver_eigen2;
@@ -212,11 +231,11 @@ int main(int argc, char *argv[])
     // Eigen::VectorXd result_eigen2 = solver_eigen2.solveWithGuess(f, x3);
     // prof.toc("solve_eigen_LU");
     std::cout<<"Eigen uses "<<Eigen::nbThreads( )<<" threads"<<std::endl;
-    std::cout << "amgcl iter:" << iters << " error " << error << std::endl;
+    std::cout << "amgcl_bicgstab iter:" << iters << " error " << error << std::endl;
     std::cout << "amgcl_bicgstabl iter:" << iters_bicgstabl << " error " << error_bicgstabl << std::endl;
     std::cout << "amgcl_idrs iter:" << iters_idrs << " error " << error_idrs << std::endl;
-    std::cout << "amgcl+eigen iter:" << iters2 << " error " << error2 << std::endl;
-    std::cout << "eigen iter:" << solver_eigen.iterations() << " error " << solver_eigen.error() << std::endl;
+    std::cout << "amgcl_bicgstab_eigen iter:" << iters2 << " error " << error2 << std::endl;
+    std::cout << "eigen_bicgstab iter:" << solver_eigen.iterations() << " error " << solver_eigen.error() << std::endl;
     std::cout << "eigen_bicgstabl iter:" << solver_eigen3.iterations() << " error " << solver_eigen3.error() << std::endl;
     std::cout << "eigen_idrstab iter:" << solver_eigen4.iterations() << " error " << solver_eigen4.error() << std::endl;
     //std::cout << "eigen_LU iter:" << solver_eigen.iterations() << " error " << solver_eigen.error() << std::endl
