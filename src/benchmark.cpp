@@ -15,6 +15,8 @@
 #include <amgcl/amg.hpp>
 #include <amgcl/coarsening/smoothed_aggregation.hpp>
 #include <amgcl/relaxation/spai0.hpp>
+#include <amgcl/relaxation/ilu0.hpp>
+#include <amgcl/relaxation/as_preconditioner.hpp>
 #include <amgcl/profiler.hpp>
 #include <amgcl/adapter/crs_tuple.hpp>
 #include <amgcl/adapter/eigen.hpp>
@@ -22,19 +24,98 @@
 
 #include "cxxopts.hpp"
 
+struct LinearSystem
+{
+    Eigen::VectorXd b;
+    Eigen::VectorXd x0;
+    Eigen::SparseMatrix<double, Eigen::RowMajor> A;
+};
+
+struct Convoptions
+{
+    int iterations;
+    double tolerance;
+};
+
+struct returnvalue
+{
+    int iterations;
+    double error;
+};
+
+template <class T>
+returnvalue RunEigen_Solver(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
+{
+
+    prof.tic("setup_" + name);
+    T Solver;
+    Solver.setTolerance(opt.tolerance);
+    Solver.setMaxIterations(opt.iterations);
+    Solver.compute(Axb.A);
+    prof.toc("setup_" + name);
+    prof.tic("solve_" + name);
+    Eigen::VectorXd result_eigen = Solver.solveWithGuess(Axb.b, Axb.x0);
+    prof.toc("solve_" + name);
+    returnvalue result;
+    result.iterations = Solver.iterations();
+    result.error = Solver.error();
+    return result;
+}
+
+template <class T>
+returnvalue RunAMGCLEigen_backend(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
+{
+
+    Eigen::VectorXd x = Axb.x0;
+    typename T::params prm;
+    prm.solver.tol = opt.tolerance;
+    prm.solver.maxiter = opt.iterations;
+    prof.tic("setup_" + name);
+    T solve(Axb.A, prm);
+    prof.toc("setup_" + name);
+    returnvalue result;
+    prof.tic("solve_" + name);
+    std::tie(result.iterations, result.error) = solve(Axb.A, Axb.b, x);
+    prof.toc("solve_" + name);
+    std::cout << solve << std::endl;
+    return result;
+}
+
+template <class T>
+returnvalue RunAMGCL_backend(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
+{
+
+    std::vector<double> x0 = std::vector<double>(Axb.x0.data(), Axb.x0.data() + Axb.x0.size());
+    std::vector<double> b = std::vector<double>(Axb.b.data(), Axb.b.data() + Axb.b.size());
+    size_t n = Axb.A.rows();
+    const int *ptr = Axb.A.outerIndexPtr();
+    const int *col = Axb.A.innerIndexPtr();
+    const double *val = Axb.A.valuePtr();
+    amgcl::backend::crs<double> A_amgcl(std::make_tuple(n,
+                                                        amgcl::make_iterator_range(ptr, ptr + n + 1),
+                                                        amgcl::make_iterator_range(col, col + ptr[n]),
+                                                        amgcl::make_iterator_range(val, val + ptr[n])));
+
+    typename T::params prm;
+    prm.solver.tol = opt.tolerance;
+    prm.solver.maxiter = opt.iterations;
+    prof.tic("setup_" + name);
+    T solve(A_amgcl, prm);
+    prof.toc("setup_" + name);
+    returnvalue result;
+    prof.tic("solve_" + name);
+    std::tie(result.iterations, result.error) = solve(A_amgcl, b, x0);
+    prof.toc("solve_" + name);
+    std::cout << solve << std::endl;
+    return result;
+}
+
 int main(int argc, char *argv[])
 {
 
     cxxopts::Options options("SparseSolverBench", "Benchmarking various sparse linear solvers");
 
-    options.add_options()
-    ("t,threads", "How many threads to use", cxxopts::value<int>()->default_value("1"))
-    ("s,tolerance", "Tolerance to which solvers should converge", cxxopts::value<double>()->default_value("1e-12"))
-    ("i,iterations", "max number of iterations", cxxopts::value<int>()->default_value("1000"))
-    ("A,SparseMatrix", "MM Format File for Sparse Matrix", cxxopts::value<std::string>())
-    ("b,Rightside", "MM Format File for Vector", cxxopts::value<std::string>())
-    ("x,initialguess", "MM Format File for InitialGuess", cxxopts::value<std::string>())
-    ("h,help", "Print usage");
+    options.add_options()("t,threads", "How many threads to use", cxxopts::value<int>()->default_value("1"))("s,tolerance", "Tolerance to which solvers should converge", cxxopts::value<double>()->default_value("1e-12"))("i,iterations", "max number of iterations", cxxopts::value<int>()->default_value("1000"))("A,SparseMatrix", "MM Format File for Sparse Matrix", cxxopts::value<std::string>())("b,Rightside", "MM Format File for Vector", cxxopts::value<std::string>())("x,initialguess", "MM Format File for InitialGuess", cxxopts::value<std::string>())("h,help", "Print usage");
 
     auto result = options.parse(argc, argv);
 
@@ -44,55 +125,44 @@ int main(int argc, char *argv[])
         exit(0);
     }
 
-std::string intial_guess_filename="";
-    if (result.count("initialguess")){
-      intial_guess_filename = result["initialguess"].as<std::string>();
+    std::string intial_guess_filename = "";
+    if (result.count("initialguess"))
+    {
+        intial_guess_filename = result["initialguess"].as<std::string>();
     }
+
+    Convoptions opt;
+
     int threads = result["threads"].as<int>();
-    double tolerance = result["tolerance"].as<double>();
-    int iterations=result["iterations"].as<int>();
+    opt.tolerance = result["tolerance"].as<double>();
+    opt.iterations = result["iterations"].as<int>();
     std::string A_filename = result["SparseMatrix"].as<std::string>();
     std::string b_filename = result["Rightside"].as<std::string>();
 
     std::cout << "Running profiler with " << threads << " threads\n"
-              << "Required tolerance " << tolerance << " num iterations "<<iterations<< "\nA:" << A_filename << "\nb" << b_filename << std::endl;
-    if(intial_guess_filename.size()){
-        std::cout<<"x0:"<<intial_guess_filename<<std::endl;
+              << "Required tolerance " << opt.tolerance << " num iterations " << opt.iterations << "\nA:" << A_filename << "\nb" << b_filename << std::endl;
+    if (intial_guess_filename.size())
+    {
+        std::cout << "x0:" << intial_guess_filename << std::endl;
     }
     omp_set_num_threads(threads);
 
     amgcl::profiler<> prof;
-
-    // Read sparse matrix from MatrixMarket format.
-    // In general this should come pre-assembled.
-    Eigen::SparseMatrix<double, Eigen::RowMajor> A;
+    LinearSystem Axb;
 
     prof.tic("read_input");
-    Eigen::loadMarket(A, A_filename);
+    Eigen::loadMarket(Axb.A, A_filename);
 
-    Eigen::VectorXd f;
-    Eigen::loadMarketVector(f, b_filename);
-    Eigen::VectorXd x0 = Eigen::VectorXd::Zero(A.rows());
-    if(intial_guess_filename.size()){
-        Eigen::loadMarketVector(x0, intial_guess_filename);
+    Eigen::loadMarketVector(Axb.b, b_filename);
+    Axb.x0 = Eigen::VectorXd::Zero(Axb.A.rows());
+    if (intial_guess_filename.size())
+    {
+        Eigen::loadMarketVector(Axb.x0, intial_guess_filename);
     }
     prof.toc("read_input");
-    std::vector<double> f2 = std::vector<double>(f.data(), f.data() + f.size());
-    Eigen::VectorXd x = x0;
-    Eigen::VectorXd x3 = x0;
 
-    std::vector<double> x2 = std::vector<double>(x.data(), x.data() + x.size());
-    std::vector<double> x4 = x2;
-    std::vector<double> x5 = x2;
-    size_t n = A.rows();
-    const int *ptr = A.outerIndexPtr();
-    const int *col = A.innerIndexPtr();
-    const double *val = A.valuePtr();
-
-    amgcl::backend::crs<double> A_amgcl(std::make_tuple(n,
-                                                        amgcl::make_iterator_range(ptr, ptr + n + 1),
-                                                        amgcl::make_iterator_range(col, col + ptr[n]),
-                                                        amgcl::make_iterator_range(val, val + ptr[n])));
+    std::vector<std::string> names;
+    std::vector<returnvalue> results;
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -101,22 +171,18 @@ std::string intial_guess_filename="";
             amgcl::coarsening::smoothed_aggregation,
             amgcl::relaxation::spai0>,
         amgcl::solver::bicgstab<amgcl::backend::builtin<double>>>
-        Solver;
+        Solver_bicgstab;
+    names.push_back("amgcl_bicgstab");
+    results.push_back(RunAMGCL_backend<Solver_bicgstab>(prof, opt, Axb, names.back()));
 
-    Solver::params prm;
-    prm.solver.tol = tolerance;
-    prm.solver.maxiter=iterations;
-    prof.tic("setup_amgcl_bicgstab");
-    Solver solve(A_amgcl, prm);
-    prof.toc("setup_amgcl_bicgstab");
-    std::cout << solve << std::endl;
-
-    // Solve the system for the given RHS:
-    int iters;
-    double error;
-    prof.tic("solve_amgcl_bicgstab");
-    std::tie(iters, error) = solve(A_amgcl, f2, x2);
-    prof.toc("solve_amgcl_bicgstab");
+    typedef amgcl::make_solver<
+        amgcl::relaxation::as_preconditioner<
+        amgcl::backend::builtin<double>,
+        amgcl::relaxation::ilu0>,
+        amgcl::solver::bicgstab<amgcl::backend::builtin<double>>>
+        Solver_bicgstab_ilut;
+    names.push_back("amgcl_bicgstab_ilut");
+    results.push_back(RunAMGCL_backend<Solver_bicgstab_ilut>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -126,22 +192,8 @@ std::string intial_guess_filename="";
             amgcl::relaxation::spai0>,
         amgcl::solver::bicgstabl<amgcl::backend::builtin<double>>>
         Solver_bicgstabl;
-
-    Solver_bicgstabl::params prm_bicgstabl;
-    prm_bicgstabl.solver.tol = tolerance;
-    prm_bicgstabl.solver.maxiter=iterations;
-    prof.tic("setup_amgcl_bicgstabl");
-    Solver_bicgstabl solve_bicgstabl(A_amgcl, prm_bicgstabl);
-    prof.toc("setup_amgcl_bicgstabl");
-    std::cout << solve_bicgstabl << std::endl;
-
-    // Solve the system for the given RHS:
-    int iters_bicgstabl;
-    double error_bicgstabl;
-    prof.tic("solve_amgcl_bicgstabl");
-    std::tie(iters_bicgstabl, error_bicgstabl) = solve_bicgstabl(A_amgcl, f2, x4);
-    prof.toc("solve_amgcl_bicgstabl");
-
+    names.push_back("amgcl_bicgstabl");
+    results.push_back(RunAMGCL_backend<Solver_bicgstabl>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -152,23 +204,8 @@ std::string intial_guess_filename="";
         amgcl::solver::idrs<amgcl::backend::builtin<double>>>
         Solver_idrs;
 
-    Solver_idrs::params prm_idrs;
-    prm_idrs.solver.tol = tolerance;
-    prm_idrs.solver.maxiter=iterations;
-    prof.tic("setup_amgcl_idrs");
-    Solver_idrs solve_idrs(A_amgcl, prm_idrs);
-    prof.toc("setup_amgcl_idrs");
-    std::cout << solve_idrs << std::endl;
-
-    // Solve the system for the given RHS:
-    int iters_idrs;
-    double error_idrs;
-    prof.tic("solve_amgcl_idrs");
-    std::tie(iters_idrs, error_idrs) = solve_idrs(A_amgcl, f2, x5);
-    prof.toc("solve_amgcl_idrs");
-
-
-
+    names.push_back("amgcl_idrs");
+    results.push_back(RunAMGCL_backend<Solver_idrs>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -179,65 +216,23 @@ std::string intial_guess_filename="";
         amgcl::solver::bicgstab<amgcl::backend::eigen<double>>>
         Solver2;
 
-    Solver2::params prm2;
-    prm2.solver.tol = tolerance;
-    prm2.solver.maxiter=iterations;
-    prof.tic("setup_amgcl_bicgstab_eigen");
-    Solver2 solve2(A, prm2);
-    prof.toc("setup_amgcl_bicgstab_eigen");
-    int iters2;
-    double error2;
-    prof.tic("solve_amgcl_bicgstab_eigen");
-    std::tie(iters2, error2) = solve2(A, f, x);
-    prof.toc("solve_amgcl_bicgstab_eigen");
-    std::cout << solve2 << std::endl;
+    names.push_back("amgcl_bicgstab_eigen");
+    results.push_back(RunAMGCLEigen_backend<Solver2>(prof, opt, Axb, names.back()));
 
-    prof.tic("setup_eigen_bicgstab");
-    Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen;
-    solver_eigen.setTolerance(tolerance);
-    solver_eigen.setMaxIterations(iterations);
-    solver_eigen.compute(A);
-    prof.toc("setup_eigen_bicgstab");
-    prof.tic("solve_eigen_bicgstab");
-    Eigen::VectorXd result_eigen = solver_eigen.solveWithGuess(f, x0);
-    prof.toc("solve_eigen_bicgstab");
+    names.push_back("eigen_bicgstab");
+    results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-    prof.tic("setup_eigen_bicgstabl");
-    Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen3;
-    solver_eigen3.setTolerance(tolerance);
-    solver_eigen3.setMaxIterations(iterations);
-    solver_eigen3.compute(A);
-    prof.toc("setup_eigen_bicgstabl");
-    prof.tic("solve_eigen_bicgstabl");
-    Eigen::VectorXd result_eigen3 = solver_eigen3.solveWithGuess(f, x0);
-    prof.toc("solve_eigen_bicgstabl");
+    names.push_back("eigen_bicgstabl");
+    results.push_back(RunEigen_Solver<Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-    prof.tic("setup_eigen_idrstab");
-    Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>> solver_eigen4;
-    solver_eigen4.setTolerance(tolerance);
-    solver_eigen4.setMaxIterations(iterations);
-    solver_eigen4.compute(A);
-    prof.toc("setup_eigen_idrstab");
-    prof.tic("solve_eigen_idrstab");
-    Eigen::VectorXd result_eigen4 = solver_eigen4.solveWithGuess(f, x0);
-    prof.toc("solve_eigen_idrstab");
+    names.push_back("eigen_idrstab");
+    results.push_back(RunEigen_Solver<Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-    // prof.tic("setup_eigen_LU");
-    // Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>, Eigen::IncompleteLUT<double>> solver_eigen2;
-    // solver_eigen2.setTolerance(tolerance);
-    // solver_eigen2.compute(A);
-    //  prof.toc("setup_eigen_LU");
-    //  prof.tic("solve_eigen_LU");
-    // Eigen::VectorXd result_eigen2 = solver_eigen2.solveWithGuess(f, x3);
-    // prof.toc("solve_eigen_LU");
-    std::cout<<"Eigen uses "<<Eigen::nbThreads( )<<" threads"<<std::endl;
-    std::cout << "amgcl_bicgstab iter:" << iters << " error " << error << std::endl;
-    std::cout << "amgcl_bicgstabl iter:" << iters_bicgstabl << " error " << error_bicgstabl << std::endl;
-    std::cout << "amgcl_idrs iter:" << iters_idrs << " error " << error_idrs << std::endl;
-    std::cout << "amgcl_bicgstab_eigen iter:" << iters2 << " error " << error2 << std::endl;
-    std::cout << "eigen_bicgstab iter:" << solver_eigen.iterations() << " error " << solver_eigen.error() << std::endl;
-    std::cout << "eigen_bicgstabl iter:" << solver_eigen3.iterations() << " error " << solver_eigen3.error() << std::endl;
-    std::cout << "eigen_idrstab iter:" << solver_eigen4.iterations() << " error " << solver_eigen4.error() << std::endl;
-    //std::cout << "eigen_LU iter:" << solver_eigen.iterations() << " error " << solver_eigen.error() << std::endl
+
+    std::cout << "Eigen uses " << Eigen::nbThreads() << " threads" << std::endl;
+    for(int i=0;i<names.size();i++){
+        std::cout << names[i]<<"\t iter:" << results[i].iterations << "\t error " << results[i].error << std::endl;
+    }
+
     std::cout << prof << std::endl;
 }
