@@ -75,6 +75,8 @@ set_package_properties(AMGCL PROPERTIES TYPE REQUIRED PURPOSE "GPU stuff")
 message(STATUS "Found AMGCL: ${AMGCL_INTERFACE_INCLUDE_DIRECTORIES}")
 
 
+find_package(CUDA)
+set_package_properties(CUDA PROPERTIES TYPE  PURPOSE "Used for GPU acceleration")
 
 
 add_subdirectory(src)

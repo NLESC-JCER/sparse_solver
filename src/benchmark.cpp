@@ -22,6 +22,10 @@
 #include <amgcl/adapter/eigen.hpp>
 #include <amgcl/backend/eigen.hpp>
 
+
+#include <amgcl/backend/cuda.hpp>
+#include <amgcl/relaxation/cusparse_ilu0.hpp>
+
 #include "cxxopts.hpp"
 
 struct LinearSystem
@@ -222,11 +226,25 @@ int main(int argc, char *argv[])
     names.push_back("eigen_bicgstab");
     results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-    names.push_back("eigen_bicgstabl");
-    results.push_back(RunEigen_Solver<Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
+    //names.push_back("eigen_bicgstabl");
+    //results.push_back(RunEigen_Solver<Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-    names.push_back("eigen_idrstab");
-    results.push_back(RunEigen_Solver<Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
+    //names.push_back("eigen_idrstab");
+    //results.push_back(RunEigen_Solver<Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
+
+
+
+    typedef amgcl::make_solver<
+        amgcl::amg<
+            amgcl::backend::cuda<double>,
+            amgcl::coarsening::smoothed_aggregation,
+            amgcl::relaxation::spai0>,
+        amgcl::solver::bicgstab<amgcl::backend::cuda<double>>>
+        Solver_cuda_bicgstab;
+    names.push_back("amgcl_cuda_bicgstab");
+    results.push_back(RunAMGCL_backend<Solver_bicgstab>(prof, opt, Axb, names.back()));
+
+
 
 
     std::cout << "Eigen uses " << Eigen::nbThreads() << " threads" << std::endl;
