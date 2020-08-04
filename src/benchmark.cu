@@ -119,22 +119,18 @@ template <class T>
 returnvalue RunAMGCLCUDA_backend(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
 {
 
-    std::vector<double> x0 = std::vector<double>(Axb.x0.data(), Axb.x0.data() + Axb.x0.size());
-    std::vector<double> b = std::vector<double>(Axb.b.data(), Axb.b.data() + Axb.b.size());
-    size_t n = Axb.A.rows();
-    const int *ptr = Axb.A.outerIndexPtr();
-    const int *col = Axb.A.innerIndexPtr();
-    const double *val = Axb.A.valuePtr();
+	thrust::device_vector<double> X = std::vector<double>(Axb.x0.data(), Axb.x0.data() + Axb.x0.size());
+	thrust::device_vector<double> F = std::vector<double>(Axb.b.data(), Axb.b.data() + Axb.b.size());
+size_t n = Axb.A.rows();
+
 
     amgcl::backend::cuda<double>::params bprm;
     cusparseCreate(&bprm.cusparse_handle);
-thrust::device_vector<double> F = b;
-    thrust::device_vector<double> X=x0;
     typename T::params prm;
     prm.solver.tol = opt.tolerance;
     prm.solver.maxiter = opt.iterations;
     prof.tic("setup_" + name);
-    T solve(std::tie(n, ptr, col, val), prm,bprm);
+    T solve(Axb.A, prm,bprm);
     prof.toc("setup_" + name);
     returnvalue result;
     prof.tic("solve_" + name);
@@ -267,13 +263,13 @@ int main(int argc, char *argv[])
 
     typedef amgcl::make_solver<
         amgcl::amg<
-            amgcl::backend::cuda<double>,
-            amgcl::coarsening::smoothed_aggregation,
+        amgcl::backend::cuda<double>,
+       amgcl::coarsening::smoothed_aggregation,
             amgcl::relaxation::spai0>,
         amgcl::solver::bicgstab<amgcl::backend::cuda<double>>>
         Solver_cuda_bicgstab;
     names.push_back("amgcl_cuda_bicgstab");
-    results.push_back(RunAMGCL_backend<Solver_bicgstab>(prof, opt, Axb, names.back()));
+    results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab>(prof, opt, Axb, names.back()));
 
 
 
