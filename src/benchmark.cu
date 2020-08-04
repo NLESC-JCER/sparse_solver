@@ -22,7 +22,6 @@
 #include <amgcl/adapter/eigen.hpp>
 #include <amgcl/backend/eigen.hpp>
 
-
 #include <amgcl/backend/cuda.hpp>
 #include <amgcl/relaxation/cusparse_ilu0.hpp>
 
