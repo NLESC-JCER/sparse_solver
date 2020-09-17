@@ -275,6 +275,18 @@ results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Ei
     names.push_back("amgcl_cuda_bicgstab");
     results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab>(prof, opt, Axb, names.back()));
 
+
+    typedef amgcl::make_solver<
+            amgcl::relaxation::as_preconditioner<
+            amgcl::backend::cuda<double>,
+            amgcl::relaxation::ilu0>,
+            amgcl::solver::bicgstab<amgcl::backend::cuda<double>>>
+            Solver_cuda_bicgstab_ilut;
+        names.push_back("amgcl_cuda_bicgstab_ilut");
+        results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab_ilut>(prof, opt, Axb, names.back()));
+    
+
+
     std::cout << "Eigen uses " << Eigen::nbThreads() << " threads" << std::endl;
     for(int i=0;i<names.size();i++){
         std::cout << names[i]<<"\t iter:" << results[i].iterations << "\t error " << results[i].error << "\t error_exact " << results[i].error_exact <<std::endl;
