@@ -1,5 +1,5 @@
 cmake_minimum_required (VERSION 3.10)
-project (benchmark C CXX)
+project (benchmark CXX CUDA )
 
 ## Set CMAKE options
 
@@ -75,9 +75,10 @@ set_package_properties(AMGCL PROPERTIES TYPE REQUIRED PURPOSE "GPU stuff")
 message(STATUS "Found AMGCL: ${AMGCL_INTERFACE_INCLUDE_DIRECTORIES}")
 
 
-find_package(CUDA)
-set_package_properties(CUDA PROPERTIES TYPE  PURPOSE "Used for GPU acceleration")
-
+if(USE_CUDA)
+  find_package(CUDA REQUIRED)
+  set_package_properties(CUDA PROPERTIES TYPE REQUIRED PURPOSE "Used for GPU acceleration")
+endif(USE_CUDA)
 
 add_subdirectory(src)
 
