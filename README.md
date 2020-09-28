@@ -14,6 +14,12 @@ cmake -DCMAKE_PREFIX_PATH="PATH_TO_AMGCL;PATH_TO_EIGEN" ..
 make
 ```
 
+If you want to use CUDA please add 
+
+```
+-DUSE_CUDA=True
+```
+
 
 In `build/src` you will find a `benchmark` executable with `-h` you get help options. 
 
