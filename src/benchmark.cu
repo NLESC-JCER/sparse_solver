@@ -83,7 +83,7 @@ returnvalue RunAMGCLEigen_backend(amgcl::profiler<> &prof, Convoptions opt, cons
     std::tie(result.iterations, result.error) = solve(Axb.A, Axb.b, x);
     prof.toc("solve_" + name);
     std::cout << solve << std::endl;
-    result.error_exact=(Axb.A*result_eigen-Axb.b).norm()/Axb.b.norm();
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
 
@@ -113,7 +113,9 @@ returnvalue RunAMGCL_backend(amgcl::profiler<> &prof, Convoptions opt, const Lin
     std::tie(result.iterations, result.error) = solve(A_amgcl, b, x0);
     prof.toc("solve_" + name);
     std::cout << solve << std::endl;
-    result.error_exact=(Axb.A*result_eigen-Axb.b).norm()/Axb.b.norm();
+    Eigen::Map<Eigen::VectorXd> x=Eigen::Map<Eigen::VectorXd>(x0.data(),x0.size());
+
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
 
@@ -140,7 +142,9 @@ size_t n = Axb.A.rows();
     std::tie(result.iterations, result.error) = solve(F, X);
     prof.toc("solve_" + name);
     std::cout << solve << std::endl;
-    result.error_exact=(Axb.A*result_eigen-Axb.b).norm()/Axb.b.norm();
+    thrust::host_vector<double> X_cpu=X;
+    Eigen::Map<Eigen::VectorXd> x=Eigen::Map<Eigen::VectorXd>(X_cpu.data(),X_cpu.size());
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
 
