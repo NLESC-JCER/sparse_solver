@@ -22,9 +22,12 @@
 #include <amgcl/adapter/eigen.hpp>
 #include <amgcl/backend/eigen.hpp>
 
+#include "../include/config.hpp"
+
+#ifdef USE_CUDA
 #include <amgcl/backend/cuda.hpp>
 #include <amgcl/relaxation/cusparse_ilu0.hpp>
-
+#endif
 #include "cxxopts.hpp"
 
 struct LinearSystem
@@ -119,6 +122,7 @@ returnvalue RunAMGCL_backend(amgcl::profiler<> &prof, Convoptions opt, const Lin
     return result;
 }
 
+#ifdef USE_CUDA
 
 template <class T>
 returnvalue RunAMGCLCUDA_backend(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
@@ -147,7 +151,7 @@ size_t n = Axb.A.rows();
     result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
-
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -267,7 +271,7 @@ results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Ei
     names.push_back("eigen_idrstab");
     results.push_back(RunEigen_Solver<Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
-
+#ifdef USE_CUDA
 
     typedef amgcl::make_solver<
         amgcl::amg<
@@ -288,7 +292,7 @@ results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Ei
             Solver_cuda_bicgstab_ilut;
         names.push_back("amgcl_cuda_bicgstab_ilut");
         results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab_ilut>(prof, opt, Axb, names.back()));
-    
+    #endif
 
 
     std::cout << "Eigen uses " << Eigen::nbThreads() << " threads" << std::endl;

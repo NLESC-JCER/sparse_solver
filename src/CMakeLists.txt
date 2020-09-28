@@ -1,6 +1,7 @@
 foreach(PROG benchmark)
-    file(GLOB ${PROG}_SOURCES ${PROG}*.cu)
+    file(GLOB ${PROG}_SOURCES ${PROG}*.cpp)
     if(USE_CUDA)
+    set_source_files_properties( ${PROG} PROPERTIES CUDA_SOURCE_PROPERTY_FORMAT OBJ )
         cuda_add_executable(${PROG} ${${PROG}_SOURCES})
     else()
         add_executable(${PROG} ${${PROG}_SOURCES})
