@@ -22,6 +22,12 @@
 #include <amgcl/adapter/eigen.hpp>
 #include <amgcl/backend/eigen.hpp>
 
+#include "../include/config.hpp"
+
+#ifdef USE_CUDA
+#include <amgcl/backend/cuda.hpp>
+#include <amgcl/relaxation/cusparse_ilu0.hpp>
+#endif
 #include "cxxopts.hpp"
 
 struct LinearSystem
@@ -41,6 +47,7 @@ struct returnvalue
 {
     int iterations;
     double error;
+    double error_exact;
 };
 
 template <class T>
@@ -59,6 +66,7 @@ returnvalue RunEigen_Solver(amgcl::profiler<> &prof, Convoptions opt, const Line
     returnvalue result;
     result.iterations = Solver.iterations();
     result.error = Solver.error();
+    result.error_exact=(Axb.A*result_eigen-Axb.b).norm()/Axb.b.norm();
     return result;
 }
 
@@ -78,6 +86,7 @@ returnvalue RunAMGCLEigen_backend(amgcl::profiler<> &prof, Convoptions opt, cons
     std::tie(result.iterations, result.error) = solve(Axb.A, Axb.b, x);
     prof.toc("solve_" + name);
     std::cout << solve << std::endl;
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
 
@@ -107,8 +116,42 @@ returnvalue RunAMGCL_backend(amgcl::profiler<> &prof, Convoptions opt, const Lin
     std::tie(result.iterations, result.error) = solve(A_amgcl, b, x0);
     prof.toc("solve_" + name);
     std::cout << solve << std::endl;
+    Eigen::Map<Eigen::VectorXd> x=Eigen::Map<Eigen::VectorXd>(x0.data(),x0.size());
+
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
     return result;
 }
+
+#ifdef USE_CUDA
+
+template <class T>
+returnvalue RunAMGCLCUDA_backend(amgcl::profiler<> &prof, Convoptions opt, const LinearSystem &Axb, const std::string &name)
+{
+
+	thrust::device_vector<double> X = std::vector<double>(Axb.x0.data(), Axb.x0.data() + Axb.x0.size());
+	thrust::device_vector<double> F = std::vector<double>(Axb.b.data(), Axb.b.data() + Axb.b.size());
+size_t n = Axb.A.rows();
+
+
+    amgcl::backend::cuda<double>::params bprm;
+    cusparseCreate(&bprm.cusparse_handle);
+    typename T::params prm;
+    prm.solver.tol = opt.tolerance;
+    prm.solver.maxiter = opt.iterations;
+    prof.tic("setup_" + name);
+    T solve(Axb.A, prm,bprm);
+    prof.toc("setup_" + name);
+    returnvalue result;
+    prof.tic("solve_" + name);
+    std::tie(result.iterations, result.error) = solve(F, X);
+    prof.toc("solve_" + name);
+    std::cout << solve << std::endl;
+    thrust::host_vector<double> X_cpu=X;
+    Eigen::Map<Eigen::VectorXd> x=Eigen::Map<Eigen::VectorXd>(X_cpu.data(),X_cpu.size());
+    result.error_exact=(Axb.A*x-Axb.b).norm()/Axb.b.norm();
+    return result;
+}
+#endif
 
 int main(int argc, char *argv[])
 {
@@ -172,8 +215,8 @@ int main(int argc, char *argv[])
             amgcl::relaxation::spai0>,
         amgcl::solver::bicgstab<amgcl::backend::builtin<double>>>
         Solver_bicgstab;
-    names.push_back("amgcl_bicgstab");
-    results.push_back(RunAMGCL_backend<Solver_bicgstab>(prof, opt, Axb, names.back()));
+names.push_back("amgcl_bicgstab");
+  results.push_back(RunAMGCL_backend<Solver_bicgstab>(prof, opt, Axb, names.back()));
 
     typedef amgcl::make_solver<
         amgcl::relaxation::as_preconditioner<
@@ -181,8 +224,8 @@ int main(int argc, char *argv[])
         amgcl::relaxation::ilu0>,
         amgcl::solver::bicgstab<amgcl::backend::builtin<double>>>
         Solver_bicgstab_ilut;
-    names.push_back("amgcl_bicgstab_ilut");
-    results.push_back(RunAMGCL_backend<Solver_bicgstab_ilut>(prof, opt, Axb, names.back()));
+  names.push_back("amgcl_bicgstab_ilut");
+  results.push_back(RunAMGCL_backend<Solver_bicgstab_ilut>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -192,8 +235,8 @@ int main(int argc, char *argv[])
             amgcl::relaxation::spai0>,
         amgcl::solver::bicgstabl<amgcl::backend::builtin<double>>>
         Solver_bicgstabl;
-    names.push_back("amgcl_bicgstabl");
-    results.push_back(RunAMGCL_backend<Solver_bicgstabl>(prof, opt, Axb, names.back()));
+   names.push_back("amgcl_bicgstabl");
+   results.push_back(RunAMGCL_backend<Solver_bicgstabl>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -204,8 +247,8 @@ int main(int argc, char *argv[])
         amgcl::solver::idrs<amgcl::backend::builtin<double>>>
         Solver_idrs;
 
-    names.push_back("amgcl_idrs");
-    results.push_back(RunAMGCL_backend<Solver_idrs>(prof, opt, Axb, names.back()));
+   names.push_back("amgcl_idrs");
+   results.push_back(RunAMGCL_backend<Solver_idrs>(prof, opt, Axb, names.back()));
 
     // Setup the solver:
     typedef amgcl::make_solver<
@@ -216,11 +259,11 @@ int main(int argc, char *argv[])
         amgcl::solver::bicgstab<amgcl::backend::eigen<double>>>
         Solver2;
 
-    names.push_back("amgcl_bicgstab_eigen");
-    results.push_back(RunAMGCLEigen_backend<Solver2>(prof, opt, Axb, names.back()));
+   names.push_back("amgcl_bicgstab_eigen");
+   results.push_back(RunAMGCLEigen_backend<Solver2>(prof, opt, Axb, names.back()));
 
-    names.push_back("eigen_bicgstab");
-    results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
+  names.push_back("eigen_bicgstab");
+results.push_back(RunEigen_Solver<Eigen::BiCGSTAB<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
     names.push_back("eigen_bicgstabl");
     results.push_back(RunEigen_Solver<Eigen::BiCGSTABL<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
@@ -228,10 +271,33 @@ int main(int argc, char *argv[])
     names.push_back("eigen_idrstab");
     results.push_back(RunEigen_Solver<Eigen::IDRStab<Eigen::SparseMatrix<double, Eigen::RowMajor>>>(prof, opt, Axb, names.back()));
 
+#ifdef USE_CUDA
+
+    typedef amgcl::make_solver<
+        amgcl::amg<
+        amgcl::backend::cuda<double>,
+       amgcl::coarsening::smoothed_aggregation,
+            amgcl::relaxation::spai0>,
+        amgcl::solver::bicgstab<amgcl::backend::cuda<double>>>
+        Solver_cuda_bicgstab;
+    names.push_back("amgcl_cuda_bicgstab");
+    results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab>(prof, opt, Axb, names.back()));
+
+
+    typedef amgcl::make_solver<
+            amgcl::relaxation::as_preconditioner<
+            amgcl::backend::cuda<double>,
+            amgcl::relaxation::ilu0>,
+            amgcl::solver::bicgstab<amgcl::backend::cuda<double>>>
+            Solver_cuda_bicgstab_ilut;
+        names.push_back("amgcl_cuda_bicgstab_ilut");
+        results.push_back(RunAMGCLCUDA_backend<Solver_cuda_bicgstab_ilut>(prof, opt, Axb, names.back()));
+    #endif
+
 
     std::cout << "Eigen uses " << Eigen::nbThreads() << " threads" << std::endl;
     for(int i=0;i<names.size();i++){
-        std::cout << names[i]<<"\t iter:" << results[i].iterations << "\t error " << results[i].error << std::endl;
+        std::cout << names[i]<<"\t iter:" << results[i].iterations << "\t error " << results[i].error << "\t error_exact " << results[i].error_exact <<std::endl;
     }
 
     std::cout << prof << std::endl;
