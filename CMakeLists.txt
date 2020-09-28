@@ -80,6 +80,7 @@ if(USE_CUDA)
   set_package_properties(CUDA PROPERTIES TYPE REQUIRED PURPOSE "Used for GPU acceleration")
 endif(USE_CUDA)
 
+add_subdirectory(include)
 add_subdirectory(src)
 
 if(ENABLE_TESTING)
